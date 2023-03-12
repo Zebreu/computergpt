@@ -1,4 +1,7 @@
 # This example requires the 'message_content' intent.
+import ast
+import atexit
+import json
 from dataclasses import dataclass
 import openai
 import os
@@ -12,35 +15,93 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 
-computer_history = []
-
 characters = {}
 
 characters_history = {}
+
+characters_history['paranoiagamemaster'] = []
+characters_history['Computer'] = []
 
 def closest_name(target):
     scored_names = [(fuzz.partial_ratio(target, name), name) for name in characters.keys()]
     closest = sorted(scored_names)[-1]
     return closest[1]
 
-def create_character():
+def decide_to_introduce_character(summary):
+    messages = [
+        {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."},
+        {"role": "user", "content": f"I will provide you with a summary of a story and you will decide \
+        if a character needs to be fleshed out for the purpose of the story, \
+        which can happen when a single character interacts with the player or does something in a scene. \
+        Please only answer with Yes or No. The summary is: {summary}"}
+    ]
+    answer = ask_chatgpt(messages)
+    if 'yes' in answer.lower():
+        info, name = create_character(f"The following summary should inspire you to introduce a character: {summary}")
+        return name, info
+    
+    return 'Nope', 'Nope'
+
+def summarize(old_messages):
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant that summarizes conversations."}
+    ]
+    messages.append({"role": "user", "content":"I will pass to you messages happening in a roleplaying game and you will summarize them at the end."})
+    
+    add_to_context_from_history(messages, old_messages)
+
+    messages.append({"role": "user", "content":"Please write a concise bullet point summary of what happened so far in this roleplaying game."})
+
+    summary = ask_chatgpt(messages)
+
+    return summary    
+
+def add_to_context_from_history(messages, history):
+    for who, past in history:        
+        if who == 'gpt':
+            current = {"role": "assistant", "content": past}
+        else:
+            current = {"role": "user", "content": past}
+        messages.append(current)
+    return messages
+
+def manage_game(message):
+    messages = [
+        {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."},
+        {"role": "user", "content":"According to my questions, you will describe what the world is like, \
+                handle what events occur, ask me how I react, and help me create dramatic moments. \
+                Please only speak as if you are the game master in the roleplaying game."}    
+    ]
+
+    history = characters_history['paranoiagamemaster']
+                
+    add_to_context_from_history(messages, history)
+
+    messages.append({"role": "user", "content": message})
+
+    history.append(('player', message))
+    answer = ask_chatgpt(messages)
+    history.append(('gpt', answer))
+    cull_history(history)
+
+    return answer
+
+def create_character(optional_info):
     messages = [
         {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."}
     ]
     
     messages.append({"role": "user", "content": 
-                    'Provide a description of a citizen living in the dystopic city of Alpha Complex. \
+                    f"Provide a description of a citizen living in the dystopic city of Alpha Complex. \
                     Describe what speaking style and accent they adopt and what area or department they work in. \
                     Optionally, mention a secret society or a mutant power. Most citizens do not have powers. \
-                    Provide name and clearance level in the format Name: <name>-<ID>, Clearance: <color>'})
+                    Provide name and clearance level in the format Name: <name>-<ID>, Clearance: <color>. \n{optional_info}"})
 
-    answer = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-    answer = extract_answer(answer)
+    answer = ask_chatgpt(messages)
     name = answer.split('Name: ')[1].split(',')[0]
     characters[name] = answer
     characters_history[name] = []
-    print(name)
-    return answer
+    return answer, name
 
 # Need to add a bit that describes the speaker
 def ask_character(message):
@@ -54,16 +115,9 @@ def ask_character(message):
         {"role": "user", "content": f"You will roleplay as the following character: {description}"},
         {"role": "assistant", "content": f"Great, I'd love to roleplay as {correct_name} and I will pay great attention to the character speaking style."},
     ]
-
-    for who, past in history:        
-        if who == 'gpt':
-            current = {"role": "assistant", "content": past}
-        else:
-            current = {"role": "user", "content": past}
-        messages.append(current)
+    
+    add_to_context_from_history(messages, history)
     messages.append({"role": "user", "content": message})
-
-    print(messages)
 
     history.append(('player', message))
     answer = ask_chatgpt(messages)
@@ -103,23 +157,21 @@ def ask_chatgpt(context):
     return extract_answer(answer)
 
 def ask_computer(message):
-    if len(computer_history) > 30:
-        goodbye = computer_history.pop(0)
-    
     messages = [
         {"role": "system", "content": "You are the Computer managing Alpha Complex from the roleplaying game Paranoia."}    
     ]
 
-    for past in computer_history:
-        if past.startswith('Computer,'):
-            current = {"role": "user", "content": past}
-        else:
-            current = {"role": "assistant", "content": past}
-        messages.append(current)
+    history = characters_history['Computer']
+
+    add_to_context_from_history(messages, history)
+
     messages.append({"role": "user", "content": message})
 
-    answer = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-    computer_history.append(answer['choices'][0]['message']['content'])
+    answer = ask_chatgpt(messages)
+    history.append(('player', message))
+    history.append(('gpt', answer))
+    cull_history(history)
+    
     return answer
 
 @client.event
@@ -134,8 +186,13 @@ async def on_message(message):
     if message.content.startswith('$hello'):
         await message.channel.send('Hello troubleshooter! I am your friendly Computer')
 
+    if message.content.startswith('(decide_character)'):
+        summary = summarize(characters_history["paranoiagamemaster"])
+        name, info = decide_to_introduce_character(summary)
+        await message.channel.send(info)
+
     if message.content.startswith('(generate)'):
-        text = create_character()
+        text, name = create_character()
         member = message.author
         await member.send(text)
 
@@ -148,7 +205,16 @@ async def on_message(message):
             await member.send(text)
         else:
             await message.channel.send(text)
-        
+    
+    if message.content.startswith('(summarise)'):
+        print(characters_history["paranoiagamemaster"])
+        answer = summarize(characters_history["paranoiagamemaster"])
+        await message.channel.send(answer)
+
+    if message.content.startswith('Game master,') or message.content.startswith('GM,'):
+        answer = manage_game(message.content)
+        await message.channel.send(answer)
+
     if message.content.startswith('Computer, can I see'):
         prompt = message.content[19:]
         expanded_prompt = expand_prompt(prompt)
@@ -157,9 +223,26 @@ async def on_message(message):
 
     elif message.content.startswith('Computer,'):
         answer = ask_computer(message.content)
-        print(answer)
-        computer_history.append(message.content)
-        text = answer['choices'][0]['message']['content']
-        await message.channel.send(text)
+        await message.channel.send(answer)
 
-client.run(os.getenv('bot_token'))
+@atexit.register
+def save_state():
+    json_characters = json.dumps(characters)
+    json_characters_history = json.dumps(characters_history)
+    with open('backup_characters.json', 'w') as opened:
+        opened.write(json_characters)
+    with open('backup_history.json', 'w') as opened:
+        opened.write(json_characters_history)
+    
+loading = True
+
+def main():
+    if loading: 
+        with open('backup_characters.json', 'r') as opened:
+            characters.update(json.loads(opened.read()))
+        with open('backup_history.json', 'r') as opened:
+            characters_history.update(json.loads(opened.read()))
+    
+    client.run(os.getenv('bot_token'))
+
+main()
