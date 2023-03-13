@@ -42,7 +42,7 @@ def decide_to_introduce_character(summary):
     
     return 'Nope', 'Nope'
 
-def summarize(old_messages):
+def summarize(old_messages, degree = ''):
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes conversations."}
     ]
@@ -50,10 +50,10 @@ def summarize(old_messages):
     
     add_to_context_from_history(messages, old_messages)
 
-    messages.append({"role": "user", "content":"Please write a concise bullet point summary of what happened so far in this roleplaying game."})
+    messages.append({"role": "user", "content":f"Please write a{degree} concise bullet point summary of what happened so far in this roleplaying game."})
 
     summary = ask_chatgpt(messages)
-
+    summary = summary + " The previous points are summarized events that have happened so far for context. Please ask the players what they do from now on."
     return summary    
 
 def add_to_context_from_history(messages, history):
@@ -80,11 +80,15 @@ def manage_game(message):
     messages.append({"role": "user", "content": message})
 
     history.append(('player', message))
-    answer = ask_chatgpt(messages)
-    history.append(('gpt', answer))
-    cull_history(history)
+    answer = ask_chatgpt(messages, raw = True)
+    history.append(('gpt', extract_answer(answer)))
 
-    return answer
+    handle_many_tokens(answer, history)
+
+    if len(history) > 12:
+        compress_history(history)
+
+    return extract_answer(answer)
 
 def create_character(optional_info):
     messages = [
@@ -126,6 +130,21 @@ def ask_character(message):
 
     return answer
 
+def compress_history(history, degree = ''):
+    summary = summarize(history, degree)
+    to_save = history[-2:]
+    history.clear()
+    history.append(('player', summary))
+    history.extend(to_save)
+
+def handle_many_tokens(answer, history):
+    if history:
+        total_tokens = answer['usage']['total_tokens'] 
+        if total_tokens > 3700:
+            if len(history) < 4:
+                compress_history(history, degree = 'n extremely')
+            compress_history(history)        
+        
 def cull_history(history):
     if len(history) > 30:
         goodbye = history.pop(0)
@@ -151,9 +170,11 @@ def expand_prompt(message):
 def extract_answer(answer):
     return answer['choices'][0]['message']['content']
 
-def ask_chatgpt(context):
+def ask_chatgpt(context, raw = False):
     answer = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=context)
     print(answer)
+    if raw:
+        return answer 
     return extract_answer(answer)
 
 def ask_computer(message):
