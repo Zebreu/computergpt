@@ -15,6 +15,8 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 
+players = {}
+
 characters = {}
 
 characters_history = {}
@@ -65,19 +67,29 @@ def add_to_context_from_history(messages, history):
         messages.append(current)
     return messages
 
-def manage_game(message):
+def manage_game(message, speaker = None):
     messages = [
         {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."},
         {"role": "user", "content":"According to my questions, you will describe what the world is like, \
                 handle what events occur, ask me how I react, and help me create dramatic moments. \
-                Please only speak as if you are the game master in the roleplaying game."}    
+                There are a few players interacting with you and you should never act as the player characters. \
+                Do not normally reveal information that may be secret as all characters may understand what you say. \
+                Please only speak as if you are the game master in the roleplaying game and always ask me how I react."}    
     ]
 
+    for author, character in players.items():
+        messages.append({"role": "user", 
+                         "content": f'Game master, here is a description of a player character that you cannot control: {character[1]}'})
+                                  
     history = characters_history['paranoiagamemaster']
                 
     add_to_context_from_history(messages, history)
 
-    messages.append({"role": "user", "content": message})
+    if speaker in players:
+        messages.append({"role": "user", 
+                         "content": message.replace('Game master,', f"Game master, this is {players[speaker][0]} speaking,")})
+    else:
+        messages.append({"role": "user", "content": message})
 
     history.append(('player', message))
     answer = ask_chatgpt(messages, raw = True)
@@ -85,7 +97,7 @@ def manage_game(message):
 
     handle_many_tokens(answer, history)
 
-    if len(history) > 12:
+    if len(history) > 15:
         compress_history(history)
 
     return extract_answer(answer)
@@ -130,6 +142,7 @@ def ask_character(message):
 
     return answer
 
+# maybe keep the old summary?
 def compress_history(history, degree = ''):
     summary = summarize(history, degree)
     to_save = history[-2:]
@@ -217,10 +230,22 @@ async def on_message(message):
         member = message.author
         await member.send(text)
 
-    if message.content.startswith('Hey '):
+    if message.content.startswith('register_character:'):
+        member = message.author
+        content = message.content[len('register_character:'):]
+
+        messages = [{"role": "system", "content": "You are a helpful assistant."}]
+        messages.append({"role": "user", "content": f"What is the name of the following character: {content}. Please only reply with the name alone without punctuation."})
+        answer = ask_chatgpt(messages)
+
+        players[member.name] = (answer, content)
+
+        await member.send(f'{answer} registered. If the name is wrong, please register again with a clearer indication of your name')
+
+    if message.content.startswith('Psst, hey, '):
         text = ask_character(message)
 
-        mode = 'from'
+        mode = 'whisper'
         if mode == 'whisper':
             member = message.author
             await member.send(text)
@@ -233,7 +258,9 @@ async def on_message(message):
         await message.channel.send(answer)
 
     if message.content.startswith('Game master,') or message.content.startswith('GM,'):
-        answer = manage_game(message.content)
+        content = message.content
+        content = content.replace('GM,', 'Game master,')
+        answer = await manage_game(content, speaker = message.author.name)
         await message.channel.send(answer)
 
     if message.content.startswith('Computer, can I see'):
@@ -248,22 +275,27 @@ async def on_message(message):
 
 @atexit.register
 def save_state():
-    json_characters = json.dumps(characters)
-    json_characters_history = json.dumps(characters_history)
     with open('backup_characters.json', 'w') as opened:
-        opened.write(json_characters)
+        opened.write(json.dumps(characters))
     with open('backup_history.json', 'w') as opened:
-        opened.write(json_characters_history)
-    
+        opened.write(json.dumps(characters_history))
+    with open('backup_players.json', 'w') as opened:
+        opened.write(json.dumps(players))
+
 loading = True
 
 def main():
-    if loading: 
-        with open('backup_characters.json', 'r') as opened:
-            characters.update(json.loads(opened.read()))
-        with open('backup_history.json', 'r') as opened:
-            characters_history.update(json.loads(opened.read()))
-    
+    try: 
+        if loading: 
+            with open('backup_characters.json', 'r') as opened:
+                characters.update(json.loads(opened.read()))
+            with open('backup_history.json', 'r') as opened:
+                characters_history.update(json.loads(opened.read()))
+            with open('backup_players.json', 'r') as opened:
+                players.update(json.loads(opened.read()))
+    except:
+        print('Nothing to load')
+
     client.run(os.getenv('bot_token'))
 
 main()
