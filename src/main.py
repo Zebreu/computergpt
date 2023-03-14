@@ -260,7 +260,7 @@ async def on_message(message):
     if message.content.startswith('Game master,') or message.content.startswith('GM,'):
         content = message.content
         content = content.replace('GM,', 'Game master,')
-        answer = await manage_game(content, speaker = message.author.name)
+        answer = manage_game(content, speaker = message.author.name)
         await message.channel.send(answer)
 
     if message.content.startswith('Computer, can I see'):
