@@ -219,25 +219,22 @@ async def on_message(message):
     
     if message.content.startswith('(ignore)'):
         return
-    
-    if message.channel.name == 'alphacomplex':
-        content = message.content
-        content = 'Game master, '+content
-        answer = await manage_game(content, speaker = message.author.name)
-        await message.channel.send(answer)
-
+        
     if message.content.startswith('$hello'):
         await message.channel.send('Hello troubleshooter! I am your friendly Computer')
-
+        return
+    
     if message.content.startswith('(decide_character)'):
         summary = summarize(characters_history["paranoiagamemaster"])
         name, info = decide_to_introduce_character(summary)
         await message.channel.send(info)
-
+        return
+    
     if message.content.startswith('(generate)'):
         text, name = create_character()
         member = message.author
         await member.send(text)
+        return
 
     if message.content.startswith('register_character:'):
         member = message.author
@@ -250,7 +247,8 @@ async def on_message(message):
         players[member.name] = (answer, content)
 
         await member.send(f'{answer} registered. If the name is wrong, please register again with a clearer indication of your name')
-
+        return 
+    
     if message.content.startswith('Psst, hey, '):
         text = ask_character(message)
 
@@ -260,18 +258,27 @@ async def on_message(message):
             await member.send(text)
         else:
             await message.channel.send(text)
+        return 
     
     if message.content.startswith('(summarise)'):
         print(characters_history["paranoiagamemaster"])
         answer = summarize(characters_history["paranoiagamemaster"])
         await message.channel.send(answer)
-
+        return
+    
     if message.content.startswith('Computer, can I see'):
         prompt = message.content[19:]
         expanded_prompt = expand_prompt(prompt)
         image_url = generate_image(expanded_prompt)
         await message.channel.send(image_url)
+        return
     
+    if message.channel.name == 'alphacomplex':
+        content = message.content
+        content = 'Game master, '+content
+        answer = await manage_game(content, speaker = message.author.name)
+        await message.channel.send(answer)
+        return
     if False:
         if message.content.startswith('Game master,') or message.content.startswith('GM,'):
             content = message.content
