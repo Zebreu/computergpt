@@ -67,7 +67,7 @@ def add_to_context_from_history(messages, history):
         messages.append(current)
     return messages
 
-def manage_game(message, speaker = None):
+async def manage_game(message, speaker = None):
     messages = [
         {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."},
         {"role": "user", "content":"According to my questions, you will describe what the world is like, \
@@ -216,6 +216,15 @@ async def on_ready():
 async def on_message(message):
     if message.author == client.user:
         return
+    
+    if message.content.startswith('(ignore)'):
+        return
+    
+    if message.channel.name == 'alphacomplex':
+        content = message.content
+        content = 'Game master, '+content
+        answer = await manage_game(content, speaker = message.author.name)
+        await message.channel.send(answer)
 
     if message.content.startswith('$hello'):
         await message.channel.send('Hello troubleshooter! I am your friendly Computer')
@@ -257,21 +266,22 @@ async def on_message(message):
         answer = summarize(characters_history["paranoiagamemaster"])
         await message.channel.send(answer)
 
-    if message.content.startswith('Game master,') or message.content.startswith('GM,'):
-        content = message.content
-        content = content.replace('GM,', 'Game master,')
-        answer = manage_game(content, speaker = message.author.name)
-        await message.channel.send(answer)
-
     if message.content.startswith('Computer, can I see'):
         prompt = message.content[19:]
         expanded_prompt = expand_prompt(prompt)
         image_url = generate_image(expanded_prompt)
         await message.channel.send(image_url)
-
-    elif message.content.startswith('Computer,'):
-        answer = ask_computer(message.content)
-        await message.channel.send(answer)
+    
+    if False:
+        if message.content.startswith('Game master,') or message.content.startswith('GM,'):
+            content = message.content
+            content = content.replace('GM,', 'Game master,')
+            answer = manage_game(content, speaker = message.author.name)
+            await message.channel.send(answer)
+        
+        elif message.content.startswith('Computer,'):
+            answer = ask_computer(message.content)
+            await message.channel.send(answer)
 
 @atexit.register
 def save_state():
