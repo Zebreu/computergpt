@@ -1,5 +1,4 @@
-# This example requires the 'message_content' intent.
-import ast
+import traceback
 import atexit
 import json
 from dataclasses import dataclass
@@ -23,6 +22,9 @@ characters_history = {}
 
 characters_history['paranoiagamemaster'] = []
 characters_history['Computer'] = []
+
+channels = {"public": None}
+guilds = {'game': None}
 
 def closest_name(target):
     scored_names = [(fuzz.partial_ratio(target, name), name) for name in characters.keys()]
@@ -105,8 +107,8 @@ async def manage_game(message, speaker = None):
                 Please only speak as if you are the game master in the roleplaying game and always ask how the players react."},
         {"role": "user", "content":'This is an example of a short response: \
             Time: 18:30, Public: You enter the briefing room and see a glowing box on a low-lying table. \n\
-            Private to <character>: You receive a secret message from the Humanists: "The Computer is spreading a bio-electro virus, \
-            Do not, I repeat, do not touch glowing boxes.'} 
+            Private to John Smith: You receive a secret message from the Humanists: "The Computer is spreading a bio-electro virus, \
+            Do not touch under circumstances any glowing boxes.'} 
     ]
 
     for author, character in players.items():
@@ -126,15 +128,27 @@ async def manage_game(message, speaker = None):
     print(messages)
 
     history.append(('player', message))
-    answer = ask_chatgpt(messages, raw = True)
-    history.append(('gpt', extract_answer(answer)))
+    raw_answer = ask_chatgpt(messages, raw = True)
+    history.append(('gpt', extract_answer(raw_answer)))
 
-    handle_many_tokens(answer, history)
+    private = {}
+    answer = extract_answer(raw_answer)
+    paragraphs = answer.split('\n')
+    for paragrah in paragraphs:
+        for player, character in players.items():
+            if f"Private to {character[0]}" in paragrah:
+                private[player] = paragrah
+                paragraphs.remove(paragrah)
+
+    public = '\n'.join([paragrah.replace(', Public:','\n') for paragrah in paragraphs])
+    #public = ''.join([paragrah.replace(', Public:','\n') for paragrah in paragraphs if ', Public:' in paragrah])
 
     if len(history) > 15:
         compress_history(history)
 
-    return extract_answer(answer)
+    handle_many_tokens(raw_answer, history)
+
+    return public, private  
 
 def create_character(optional_info):
     messages = [
@@ -272,7 +286,7 @@ async def register_character(context, message: str):
     messages.append({"role": "user", "content": f"What is the name of the following character: {content}. Please only reply with the name alone without punctuation."})
     answer = ask_chatgpt(messages)
 
-    players[member.name] = (answer, content)
+    players[str(member.id)] = (answer, content)
 
     await context.respond(f'{answer} registered. If the name is wrong, please register again with a clearer indication of your name')
 
@@ -326,7 +340,7 @@ async def on_message(message):
         messages.append({"role": "user", "content": f"What is the name of the following character: {content}. Please only reply with the name alone without punctuation."})
         answer = ask_chatgpt(messages)
 
-        players[member.name] = (answer, content)
+        players[str(member.id)] = (answer, content)
 
         await member.send(f'{answer} registered. If the name is wrong, please register again with a clearer indication of your name')
         return 
@@ -363,17 +377,37 @@ async def on_message(message):
         return
 
     if isinstance(message.channel, discord.DMChannel):
+        channel = channels['public']
+        guild = guilds['game']
+        reply = await channel.send("Typing...")
         member = message.author
         content = message.content
         content = 'Game master, '+content
-        answer = await manage_game(content, speaker = message.author.name)
-        await member.send(answer)
+        public, private = await manage_game(content, speaker = str(message.author.id))
+        await reply.edit(public)
+        if private:
+            for user, private_info in private.items():
+                members = await guild.query_members(user_ids = [int(user)])
+                member = members[0]
+                await member.send(private_info)
+        return
     
     elif message.channel.name == 'alphacomplex':
-        content = message.content
-        content = 'Game master, '+content
-        answer = await manage_game(content, speaker = message.author.name)
-        await message.channel.send(answer)
+        channels['public'] = message.channel
+        guilds['game'] = message.guild
+        reply = await message.channel.send("Typing...")
+        try:
+            content = message.content
+            content = 'Game master, '+content
+            public, private = await manage_game(content, speaker = str(message.author.id))
+            await reply.edit(public)
+            if private:
+                for user, private_info in private.items():
+                    members = await message.guild.query_members(user_ids = [int(user)])
+                    member = members[0]
+                    await member.send(private_info)
+        except Exception as e:
+            await reply.edit(f'{traceback.print_exc()}')
         return
             
     if False:
