@@ -108,7 +108,7 @@ async def manage_game(message, speaker = None):
         {"role": "user", "content":'This is an example of a short response: \
             Time: 18:30, Public: You enter the briefing room and see a glowing box on a low-lying table. \n\
             Private to John Smith: You receive a secret message from the Humanists: "The Computer is spreading a bio-electro virus, \
-            Do not touch under circumstances any glowing boxes.'} 
+            Do not touch under circumstances any glowing boxes."'} 
     ]
 
     for author, character in players.items():
@@ -410,17 +410,6 @@ async def on_message(message):
             await reply.edit(f'{traceback.print_exc()}')
         return
             
-    if False:
-        if message.content.startswith('Game master,') or message.content.startswith('GM,'):
-            content = message.content
-            content = content.replace('GM,', 'Game master,')
-            answer = manage_game(content, speaker = message.author.name)
-            await message.channel.send(answer)
-        
-        elif message.content.startswith('Computer,'):
-            answer = ask_computer(message.content)
-            await message.channel.send(answer)
-
 @atexit.register
 def save_state():
     with open('backup_characters.json', 'w') as opened:
