@@ -13,7 +13,7 @@ openai.api_key = os.getenv('openaikey')
 intents = discord.Intents.default()
 intents.message_content = True
 
-client = discord.Client(intents=intents)
+client = discord.Bot(intents=intents)
 
 players = {}
 
@@ -44,6 +44,31 @@ def decide_to_introduce_character(summary):
     
     return 'Nope', 'Nope'
 
+def decide_to_whisper():
+    messages = [
+        {"role": "system", "content": "You are the game master in the roleplaying game Paranoia."},
+    ]
+
+    for author, character in players.items():
+        messages.append({"role": "user", 
+                         "content": f'Game master, here is a description of a player character that you cannot control: {character[1]}'})
+                                  
+    history = characters_history['paranoiagamemaster']
+                
+    add_to_context_from_history(messages, history)
+
+    messages.append({"role": "user", "content": f"Given the story above, can you decide \
+        if a character needs to receive a secret message, which can happen when something dramatic, \
+        controversial, or dangerous, is revealed to only one player character.\
+        Please answer with the following format: Decision:<yes_or_no>, Name:<player_character>, Message:<message>"})
+
+    answer = ask_chatgpt(messages)
+    if 'yes' in answer.lower()[0:20]:
+        decision, name = answer.split('Name:')
+        return decision, name
+    else:
+        return 'Nope', 'Nope'
+
 def summarize(old_messages, degree = ''):
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes conversations."}
@@ -73,8 +98,11 @@ async def manage_game(message, speaker = None):
         {"role": "user", "content":"According to my questions, you will describe what the world is like, \
                 handle what events occur, ask me how I react, and help me create dramatic moments. \
                 There are a few players interacting with you and you should never act as the player characters. \
-                Do not normally reveal information that may be secret as all characters may understand what you say. \
-                Please only speak as if you are the game master in the roleplaying game and always ask me how I react."}    
+                Decide if a player character should receive secret information (this happens when they receive secret communication or do treasonous actions) by appending your response with private text.\
+                You will speak in a format similar to the following: Time: <hour:minute> Public: <response> \n Private to <character>: <information>. \
+                Anything in the Public text is something that could be known by all player characters. \
+                Anything in the Private text is something that should be only be known by the named character. \
+                Please only speak as if you are the game master in the roleplaying game and always ask how the players react."}    
     ]
 
     for author, character in players.items():
@@ -90,6 +118,8 @@ async def manage_game(message, speaker = None):
                          "content": message.replace('Game master,', f"Game master, this is {players[speaker][0]} speaking,")})
     else:
         messages.append({"role": "user", "content": message})
+
+    print(messages)
 
     history.append(('player', message))
     answer = ask_chatgpt(messages, raw = True)
@@ -180,6 +210,19 @@ def expand_prompt(message):
         print('Too long', expanded_prompt)
     return expanded_prompt
 
+def illustrate_event(message):
+    messages = [
+        {"role": "system", "content": "You are a helpful visual description assistant. You only write through visual descriptors."}    
+    ]
+    style = "in the style of the classic science fiction illustrator Tim White"
+    style = "in the style of Magritte"
+    base_prompt = f"{message}"
+    messages.append({"role": "user", "content": f"Can you transform a part of a story into a detailed visual description that would create an amazing illustration. Keep it under 50 words. The prompt is: {base_prompt} {style}"})
+    expanded_prompt = ask_chatgpt(messages)
+    if len(expanded_prompt) > 400:
+        print('Too long', expanded_prompt)
+    return expanded_prompt
+
 def extract_answer(answer):
     return answer['choices'][0]['message']['content']
 
@@ -212,12 +255,42 @@ def ask_computer(message):
 async def on_ready():
     print(f'We have logged in as {client.user}')
 
+@client.command(name= "ignore", description= "Hides this message from ComputerGPT. You can also prefix any message with (ignore")
+async def ignore(context, message: str):
+    await context.respond(f'Ignored: {context.author.name} said: {message}')
+
+@client.command(name= "register_character", description= "Describe your character for ComputerGPT")
+async def register_character(context, message: str):
+    member = context.author
+    content = message
+
+    messages = [{"role": "system", "content": "You are a helpful assistant."}]
+    messages.append({"role": "user", "content": f"What is the name of the following character: {content}. Please only reply with the name alone without punctuation."})
+    answer = ask_chatgpt(messages)
+
+    players[member.name] = (answer, content)
+
+    await context.respond(f'{answer} registered. If the name is wrong, please register again with a clearer indication of your name')
+
+@client.command(name= "forget_interaction", description= "Rewinds by one turn the conversation.")
+async def forget_interaction(context):
+    history = characters_history['paranoiagamemaster']
+    gpt_response = history.pop()
+    player_input = history.pop()
+    await context.respond('Past interaction forgotten.')
+
+@client.command(name= "please_wipe_all_history", description= "Bzzzt! Rewind to a fresh start.")
+async def forget_interaction(context):
+    history = characters_history['paranoiagamemaster']
+    history.clear()
+    await context.respond('Memory wiped.')
+
 @client.event
 async def on_message(message):
     if message.author == client.user:
         return
     
-    if message.content.startswith('(ignore)'):
+    if message.content.startswith('(ignore') :
         return
         
     if message.content.startswith('$hello'):
@@ -228,6 +301,11 @@ async def on_message(message):
         summary = summarize(characters_history["paranoiagamemaster"])
         name, info = decide_to_introduce_character(summary)
         await message.channel.send(info)
+        return
+    
+    if message.content.startswith('(decide_whisper)'):
+        decision, name = decide_to_whisper()
+        await message.channel.send(name)
         return
     
     if message.content.startswith('(generate)'):
@@ -273,12 +351,27 @@ async def on_message(message):
         await message.channel.send(image_url)
         return
     
-    if message.channel.name == 'alphacomplex':
+    if message.content.startswith('(recent_event)'):
+        most_recent = characters_history["paranoiagamemaster"][-1]
+        expanded_prompt = illustrate_event(most_recent)
+        image_url = generate_image(expanded_prompt)
+        await message.channel.send(image_url)
+        return
+
+    if isinstance(message.channel, discord.DMChannel):
+        member = message.author
+        content = message.content
+        content = 'Game master, '+content
+        answer = await manage_game(content, speaker = message.author.name)
+        await member.send(answer)
+    
+    elif message.channel.name == 'alphacomplex':
         content = message.content
         content = 'Game master, '+content
         answer = await manage_game(content, speaker = message.author.name)
         await message.channel.send(answer)
         return
+            
     if False:
         if message.content.startswith('Game master,') or message.content.startswith('GM,'):
             content = message.content
@@ -302,7 +395,7 @@ def save_state():
 loading = True
 
 def main():
-    try: 
+    try:
         if loading: 
             with open('backup_characters.json', 'r') as opened:
                 characters.update(json.loads(opened.read()))
