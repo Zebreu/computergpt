@@ -99,10 +99,14 @@ async def manage_game(message, speaker = None):
                 handle what events occur, ask me how I react, and help me create dramatic moments. \
                 There are a few players interacting with you and you should never act as the player characters. \
                 Decide if a player character should receive secret information (this happens when they receive secret communication or do treasonous actions) by appending your response with private text.\
-                You will speak in a format similar to the following: Time: <hour:minute> Public: <response> \n Private to <character>: <information>. \
+                You will speak in a format similar to the following: Time: <hour:minute>, Public: <response> \n Private to <character>: <information>. \
                 Anything in the Public text is something that could be known by all player characters. \
                 Anything in the Private text is something that should be only be known by the named character. \
-                Please only speak as if you are the game master in the roleplaying game and always ask how the players react."}    
+                Please only speak as if you are the game master in the roleplaying game and always ask how the players react."},
+        {"role": "user", "content":'This is an example of a short response: \
+            Time: 18:30, Public: You enter the briefing room and see a glowing box on a low-lying table. \n\
+            Private to <character>: You receive a secret message from the Humanists: "The Computer is spreading a bio-electro virus, \
+            Do not, I repeat, do not touch glowing boxes.'} 
     ]
 
     for author, character in players.items():
